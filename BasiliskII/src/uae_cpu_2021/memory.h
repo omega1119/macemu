@@ -27,6 +27,14 @@
 extern uintptr MEMBaseDiff;
 #endif
 
+#if SCC_EMULATION
+// Byte accesses to the emulated SCC register window (see scc.h)
+extern uae_u32 SCCEmuBase, SCCEmuSize;
+extern uae_u32 SCCEmuReadByte(uae_u32 addr);
+extern void SCCEmuWriteByte(uae_u32 addr, uae_u32 b);
+#define IS_SCC_ADDRESS(addr) (__builtin_expect((uae_u32)((addr) - SCCEmuBase) < SCCEmuSize, 0))
+#endif
+
 extern void Exception (int, uaecptr);
 #ifdef EXCEPTIONS_VIA_LONGJMP
     extern JMP_BUF excep_env;
@@ -78,6 +86,10 @@ static __inline__ uae_u32 get_word(uaecptr addr)
 #define phys_get_word get_word
 static __inline__ uae_u32 get_byte(uaecptr addr)
 {
+#if SCC_EMULATION
+    if (IS_SCC_ADDRESS(addr))
+        return SCCEmuReadByte(addr);
+#endif
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     return do_get_mem_byte(m);
 }
@@ -96,6 +108,12 @@ static __inline__ void put_word(uaecptr addr, uae_u32 w)
 #define phys_put_word put_word
 static __inline__ void put_byte(uaecptr addr, uae_u32 b)
 {
+#if SCC_EMULATION
+    if (IS_SCC_ADDRESS(addr)) {
+        SCCEmuWriteByte(addr, b);
+        return;
+    }
+#endif
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     do_put_mem_byte(m, b);
 }

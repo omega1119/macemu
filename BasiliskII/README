@@ -313,6 +313,11 @@ seriala <serial port description>
     Specify the device name of a serial port (e.g. "/dev/ttyS0") or a
     parallel "lp" port (e.g. "/dev/lp1"; this only works under Linux and
     FreeBSD). See below for more information about parallel ports.
+    Prefix the device name with "emuser:" (e.g.
+    "emuser:/dev/cu.usbmodem454D55534552101") when it is an EMuSer
+    USB-RS422 adapter for E-mu Emax/Emulator samplers: requested rates are
+    then translated to the adapter's magic settings (38400 8N1 for the
+    31250 baud MIDI speed, 50 8O1 for the 500 kbaud fast transfer mode).
 
   AmigaOS:
     You have to specify the name of the serial device and the device unit
@@ -337,6 +342,35 @@ serialb <serial port description>
   by Basilisk II. If no "serialb" line is given, Basilisk II will try to
   automatically detect and use installed serial ports. The format of the
   "serial port description" is the same as that of the "seriala" option.
+
+serialdebug <"true" or "false">
+
+  Log serial port activity (Serial Driver calls, line settings, data and,
+  with "sccemu", SCC register accesses) to stderr. Unix only.
+
+sccemu <"true" or "false">
+
+  Some programs (e.g. Digidesign TurboSynth, Alchemy and many MIDI programs)
+  don't use the MacOS Serial Driver but program the Z8530 SCC chip directly.
+  If this item is set to "true", Basilisk II emulates the SCC registers for
+  these programs, connected to the "seriala" (channel A, modem port) and
+  "serialb" (channel B, printer port) devices. The line settings programmed
+  into the SCC are applied to the host device, using the exact rate where
+  possible (e.g. 31250 baud on a PTY). Only polled I/O is supported (no SCC
+  interrupts), and the SCC registers are not seen by the JIT compiler, so
+  set "jit false" on x86_64. Unix only; the default is "false".
+
+sccextclock <frequency in Hz>
+
+  Frequency of the external clock on the HSKi (CTS) line that a device such
+  as a MIDI interface provides to the SCC. The default is 1000000 (1 MHz,
+  giving 31250 baud in the x32 clock mode used for MIDI).
+
+sccpolldelay <microseconds>
+
+  How long a polled read of the SCC status register takes while no data is
+  waiting. This keeps programs' busy-wait timeout loops close to their
+  duration on a real Mac. The default is 5; 0 disables the delay.
 
 ether <ethernet card description>
 
@@ -916,7 +950,7 @@ Acknowledgements
 
 Contributions by (in alphabetical order):
  - Orlando Bassotto <future@powercube.mediabit.net>: FreeBSD support
- - Gwenolé Beauchesne <gb@dial.oleane.com>: SPARC assembly optimizations,
+ - Gwenolï¿½ Beauchesne <gb@dial.oleane.com>: SPARC assembly optimizations,
    lots of work on the Unix video code, fixes and improvements to the
    JIT compiler
  - Marc Chabanas <Marc.Chabanas@france.sun.com>: Solaris sound support
@@ -925,7 +959,7 @@ Contributions by (in alphabetical order):
  - Bill Huey <billh@mag.ucsd.edu>: 15/16 bit DGA and 15/16/32 bit X11
    window support
  - Brian J. Johnson <bjohnson@sgi.com>: IRIX support
- - Jürgen Lachmann <juergen_lachmann@t-online.de>: AmigaOS CyberGraphX support
+ - Jï¿½rgen Lachmann <juergen_lachmann@t-online.de>: AmigaOS CyberGraphX support
  - Samuel Lander <blair_sp@hotmail.com>: tile-based window refresh code
  - David Lawrence <davidl@jlab.org>: incremental window refresh code
  - Bernie Meyer <bmeyer@csse.monash.edu.au>: original UAE-JIT code

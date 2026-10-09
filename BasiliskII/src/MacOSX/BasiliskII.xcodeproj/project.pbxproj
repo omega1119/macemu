@@ -85,6 +85,8 @@
 		E4555EED2354434B00139FCE /* Credits.html in Resources */ = {isa = PBXBuildFile; fileRef = 7539E00A1F23B25A006B2DF2 /* Credits.html */; };
 		E490334E20D3A5890012DD5F /* clip_macosx64.mm in Sources */ = {isa = PBXBuildFile; fileRef = E490334D20D3A5890012DD5F /* clip_macosx64.mm */; };
 		E4BF7BD42EAF173A002F2E3A /* serial_unix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4BF7BD32EAF173A002F2E3A /* serial_unix.cpp */; };
+		E4BF7BE12EAF2000002F2E3A /* scc.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4BF7BE22EAF2000002F2E3A /* scc.cpp */; };
+		E4BF7BE32EAF2000002F2E3A /* scc_unix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4BF7BE42EAF2000002F2E3A /* scc_unix.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -319,6 +321,10 @@
 		E45769B52643A6740063BAF1 /* uae_cpu_2021.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = uae_cpu_2021.xcodeproj; sourceTree = "<group>"; };
 		E490334D20D3A5890012DD5F /* clip_macosx64.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = clip_macosx64.mm; sourceTree = "<group>"; };
 		E4BF7BD32EAF173A002F2E3A /* serial_unix.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = serial_unix.cpp; sourceTree = "<group>"; };
+		E4BF7BE22EAF2000002F2E3A /* scc.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = scc.cpp; path = ../scc.cpp; sourceTree = "<group>"; };
+		E4BF7BE42EAF2000002F2E3A /* scc_unix.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = scc_unix.cpp; sourceTree = "<group>"; };
+		E4BF7BE52EAF2000002F2E3A /* scc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = scc.h; sourceTree = "<group>"; };
+		E4BF7BE62EAF2000002F2E3A /* serial_line_unix.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = serial_line_unix.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -469,6 +475,7 @@
 				7539DFEA1F23B25A006B2DF2 /* rom_patches.h */,
 				7539DFEB1F23B25A006B2DF2 /* rsrc_patches.h */,
 				7539DFEC1F23B25A006B2DF2 /* scsi.h */,
+				E4BF7BE52EAF2000002F2E3A /* scc.h */,
 				7539DFED1F23B25A006B2DF2 /* serial.h */,
 				7539DFEE1F23B25A006B2DF2 /* serial_defs.h */,
 				7539DFEF1F23B25A006B2DF2 /* slot_rom.h */,
@@ -557,6 +564,7 @@
 				7539E0701F23B25A006B2DF2 /* scsi.cpp */,
 				7539E0711F23B25A006B2DF2 /* SDL */,
 				7539E0771F23B25A006B2DF2 /* serial.cpp */,
+				E4BF7BE22EAF2000002F2E3A /* scc.cpp */,
 				4ECAC23C1F8A89ED0013B963 /* slirp */,
 				7539E0A21F23B25A006B2DF2 /* slot_rom.cpp */,
 				7539E0A31F23B25A006B2DF2 /* sony.cpp */,
@@ -588,6 +596,8 @@
 				7539E2241F23B32A006B2DF2 /* rpc_unix.cpp */,
 				7539E2251F23B32A006B2DF2 /* semaphore.h */,
 				E4BF7BD32EAF173A002F2E3A /* serial_unix.cpp */,
+				E4BF7BE42EAF2000002F2E3A /* scc_unix.cpp */,
+				E4BF7BE62EAF2000002F2E3A /* serial_line_unix.h */,
 				7539E22A1F23B32A006B2DF2 /* sshpty.c */,
 				7539E22B1F23B32A006B2DF2 /* sshpty.h */,
 				7539E22C1F23B32A006B2DF2 /* strlcpy.c */,
@@ -840,6 +850,8 @@
 				E413D92C20D260BC00E437D8 /* slirp.c in Sources */,
 				7539E12F1F23B25A006B2DF2 /* macos_util.cpp in Sources */,
 				E4BF7BD42EAF173A002F2E3A /* serial_unix.cpp in Sources */,
+				E4BF7BE12EAF2000002F2E3A /* scc.cpp in Sources */,
+				E4BF7BE32EAF2000002F2E3A /* scc_unix.cpp in Sources */,
 				E490334E20D3A5890012DD5F /* clip_macosx64.mm in Sources */,
 				7539E24A1F23B32A006B2DF2 /* disk_sparsebundle.cpp in Sources */,
 				7539E18D1F23B25A006B2DF2 /* slot_rom.cpp in Sources */,
