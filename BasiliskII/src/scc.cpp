@@ -114,6 +114,23 @@ SCCLineSettings SCCComputeLineSettings(const uint8 *wr, uint32 ext_clock_hz)
 }
 
 
+uint64 SCCByteTimeNs(const SCCLineSettings &s)
+{
+	if (s.baud == 0)
+		return 0;
+	int bits = s.data_bits + (s.parity ? 1 : 0);
+	if (!s.synchronous)
+		bits += 1 + s.stop_bits;	// Start and stop bits
+	return (uint64)bits * 1000000000ULL / s.baud;
+}
+
+static uint64 now_ns(void)
+{
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+
 /*
  *  Chip model
  */
@@ -122,6 +139,7 @@ SCCChip::SCCChip()
 {
 	ext_clock_hz = SCC_EXT_CLOCK_HZ;
 	poll_delay_us = 5;
+	tx_pacing = true;
 	debug = false;
 	for (int c = 0; c < 2; c++) {
 		memset(&ch[c], 0, sizeof(ch[c]));
@@ -170,6 +188,7 @@ void SCCChip::reset_channel(int c, bool hardware)
 		p.wr[15] = 0xf8;
 	}
 	p.reg_ptr = 0;
+	p.tx_free_ns = 0;
 
 	// Data received while nobody was listening would have been lost on real hardware
 	if (p.host && p.host->is_open())
@@ -263,8 +282,8 @@ uint8 SCCChip::read_control(int c)
 			}
 			return v;
 		}
-		case 1: case 5:
-			return 0x07;	// All sent, 8 bit residue code
+		case 1: case 5:		// Bit 0: all sent; 8 bit residue code
+			return (p.tx_free_ns <= now_ns() ? 0x01 : 0x00) | 0x06;
 		case 2: case 6:
 			if (c == 0)
 				return p.wr[2];
@@ -345,10 +364,37 @@ uint8 SCCChip::read_data(int c)
 	return p.last_rx;
 }
 
+// A real SCC has a one-byte transmit buffer in front of the shift register:
+// a new byte fits once the previous one has started shifting out. Programs
+// poll "Tx buffer empty" before writing; instead of exposing a busy flag
+// (which could make timeout loops give up and drop bytes) the write waits.
+// This sends data at the real line rate, as the Mac hardware did.
+void SCCChip::pace_tx(int c)
+{
+	Channel &p = ch[c];
+	if (!tx_pacing || !p.line_valid)
+		return;
+	uint64 byte_ns = SCCByteTimeNs(p.line);
+	if (byte_ns == 0)
+		return;
+	uint64 now = now_ns();
+	if (p.tx_free_ns > now + byte_ns) {
+		uint64 ready = p.tx_free_ns - byte_ns;
+		uint64 limit = now + 10000000ULL;	// Never stall the emulator more than 10 ms
+		if (ready > limit)
+			ready = limit;
+		while ((now = now_ns()) < ready)
+			;
+	}
+	uint64 start = p.tx_free_ns > now ? p.tx_free_ns : now;
+	p.tx_free_ns = start + byte_ns;
+}
+
 void SCCChip::write_data(int c, uint8 value)
 {
 	if (debug)
 		fprintf(stderr, "SCC %c: tx %02x\n", chan_name[c], value);
+	pace_tx(c);
 	if (ensure_host(c))
 		ch[c].host->write_byte(value);
 }

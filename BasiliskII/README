@@ -356,7 +356,9 @@ sccemu <"true" or "false">
   these programs, connected to the "seriala" (channel A, modem port) and
   "serialb" (channel B, printer port) devices. The line settings programmed
   into the SCC are applied to the host device, using the exact rate where
-  possible (e.g. 31250 baud on a PTY). Only polled I/O is supported (no SCC
+  possible (e.g. 31250 baud on a PTY). Like a real SCC, data is transmitted
+  no faster than the programmed line rate (one byte buffered while the
+  previous one is being sent). Only polled I/O is supported (no SCC
   interrupts), and the SCC registers are not seen by the JIT compiler, so
   set "jit false" on x86_64. Unix only; the default is "false".
 

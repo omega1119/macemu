@@ -117,7 +117,10 @@ public:
 		SCCLineSettings line;
 		SCCHostChannel *host;
 		bool host_failed;
+		uint64 tx_free_ns;		// When the transmitter finishes the last byte (monotonic ns)
 	} ch[2];
+
+	bool tx_pacing;				// Transmit no faster than the line rate, like a real SCC
 
 private:
 	void reset_channel(int c, bool hardware);
@@ -129,6 +132,10 @@ private:
 	bool ensure_host(int c);
 	void update_line(int c);
 	void wait_poll_delay(int c);
+	void pace_tx(int c);
 };
+
+// Time one character takes on the line in nanoseconds (0 if unknown)
+extern uint64 SCCByteTimeNs(const SCCLineSettings &s);
 
 #endif
