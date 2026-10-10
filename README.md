@@ -1,3 +1,6 @@
+### About this fork
+This fork adds Z8530 serial chip (SCC) emulation and serial driver fixes to Basilisk II, so classic Mac programs that drive the serial ports directly can talk to real hardware through a USB serial adapter. Verified with Digidesign TurboSynth 2.0 transferring samples to and from an E-mu Emax II over an EMuSer USB-RS422 adapter. See [BasiliskII/SERIAL-SCC.md](BasiliskII/SERIAL-SCC.md).
+
 #### BasiliskII
 ```
 macOS     x86_64 JIT / arm64 non-JIT

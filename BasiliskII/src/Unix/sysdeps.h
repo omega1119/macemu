@@ -115,6 +115,11 @@
 /* ExtFS is supported */
 #define SUPPORTS_EXTFS 1
 
+/* Z8530 SCC register emulation (enabled at runtime with the "sccemu" pref) */
+#if EMULATED_68K && (REAL_ADDRESSING || DIRECT_ADDRESSING)
+#define SCC_EMULATION 1
+#endif
+
 /* BSD socket API supported */
 #define SUPPORTS_UDP_TUNNEL 1
 

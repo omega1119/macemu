@@ -42,6 +42,7 @@ prefs_desc common_prefs_items[] = {
 	{"screenmodes", TYPE_INT32, false,  "bitmap of allowed fullscreen video modes"},
 	{"seriala", TYPE_STRING, false,     "device name of Mac serial port A"},
 	{"serialb", TYPE_STRING, false,     "device name of Mac serial port B"},
+	{"serialdebug", TYPE_BOOLEAN, false, "log serial port activity to stderr"},
 	{"rom", TYPE_STRING, false,         "path of ROM file"},
 	{"bootdrive", TYPE_INT32, false,    "boot drive number"},
 	{"bootdriver", TYPE_INT32, false,   "boot driver number"},

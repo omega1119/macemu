@@ -31,6 +31,7 @@
 #include "audio.h"
 #include "video.h"
 #include "serial.h"
+#include "scc.h"
 #include "ether.h"
 #include "clip.h"
 #include "adb.h"
@@ -153,6 +154,9 @@ bool InitAll(const char *vmdir)
 
 	// Init serial ports
 	SerialInit();
+#if SCC_EMULATION
+	SCCInit();
+#endif
 
 	// Init network
 	EtherInit();
@@ -235,6 +239,9 @@ void ExitAll(void)
 	TimerExit();
 
 	// Exit serial ports
+#if SCC_EMULATION
+	SCCExit();
+#endif
 	SerialExit();
 
 	// Exit network

@@ -28,6 +28,8 @@
 
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <termios.h>
@@ -45,6 +47,7 @@
 #include "prefs.h"
 #include "serial.h"
 #include "serial_defs.h"
+#include "serial_line_unix.h"
 
 extern "C" {
 #include "sshpty.h"
@@ -55,6 +58,13 @@ extern "C" {
 #include "debug.h"
 
 #define MONITOR 0
+
+// Runtime logging, enabled with the "serialdebug" pref
+static bool serial_debug = false;
+#define SERIAL_LOG(...) do { if (serial_debug) fprintf(stderr, __VA_ARGS__); } while (0)
+
+// Timeout for blocking reads, so KillIO and close never wait forever
+const int INPUT_POLL_TIMEOUT_MS = 100;
 
 
 // IRIX missing or unsupported defines
@@ -87,11 +97,17 @@ class XSERDPort : public SERDPort {
 public:
 	XSERDPort(const char *dev)
 	{
-		device_name = dev;
+		device_name = serial_parse_path(dev, &emuser);
 		protocol = serial;
 		fd = -1;
 		pid = 0;
 		input_thread_active = output_thread_active = false;
+		baud = 9600;
+		data_bits = 8;
+		parity = 0;
+		stop_bits = 1;
+		ext_clock = false;
+		custom_speed = 0;
 
 		Set_pthread_attr(&thread_attr, 2);
 	}
@@ -128,11 +144,13 @@ public:
 private:
 	bool open_pty(void);
 	bool configure(uint16 config);
+	void apply_line(void);
 	void set_handshake(uint32 s, bool with_dtr);
 	static void *input_func(void *arg);
 	static void *output_func(void *arg);
 
 	const char *device_name;			// Device name
+	bool emuser;						// Flag: translate rates for an EMuSer adapter
 	enum {serial, parallel, pty, midi}
 		protocol;						// Type of device
 	int fd;								// FD of device
@@ -156,6 +174,13 @@ private:
 	uint32 output_pb;					// Command parameter for output thread
 
 	struct termios mode;				// Terminal configuration
+
+	uint32 baud;						// Current line settings requested by MacOS
+	int data_bits;
+	int parity;							// 0 = none, 1 = odd, 2 = even
+	int stop_bits;
+	bool ext_clock;						// External clock on HSKi (kOptionClockX1CTS)
+	uint32 custom_speed;				// Non-standard rate set with IOSSIOSPEED (0 = none)
 };
 
 
@@ -165,9 +190,14 @@ private:
 
 void SerialInit(void)
 {
+	serial_debug = PrefsFindBool("serialdebug");
+
 	// Read serial preferences and create structs for both ports
-	the_serd_port[0] = new XSERDPort(PrefsFindString("seriala"));
-	the_serd_port[1] = new XSERDPort(PrefsFindString("serialb"));
+	const char *seriala = PrefsFindString("seriala");
+	const char *serialb = PrefsFindString("serialb");
+	SERIAL_LOG("SerialInit: seriala='%s' serialb='%s'\n", seriala ? seriala : "(null)", serialb ? serialb : "(null)");
+	the_serd_port[0] = new XSERDPort(seriala);
+	the_serd_port[1] = new XSERDPort(serialb);
 }
 
 
@@ -188,6 +218,8 @@ void SerialExit(void)
 
 int16 XSERDPort::open(uint16 config)
 {
+	SERIAL_LOG("XSERDPort::open: device='%s' config=%04x\n", device_name ? device_name : "(null)", config);
+
 	// Don't open NULL name devices
 	if (device_name == NULL)
 		return openErr;
@@ -195,6 +227,8 @@ int16 XSERDPort::open(uint16 config)
 	// Init variables
 	io_killed = false;
 	quitting = false;
+	ext_clock = false;
+	custom_speed = 0;
 
 	// Open port, according to the syntax of the path
 	if (device_name[0] == '|') {
@@ -207,10 +241,12 @@ int16 XSERDPort::open(uint16 config)
 		return openErr;
 	}
 	else {
-		// Device special file
-		fd = ::open(device_name, O_RDWR);
-		if (fd < 0)
+		// Device special file (O_NOCTTY: a PTY must not become our controlling terminal)
+		fd = ::open(device_name, O_RDWR | O_NOCTTY);
+		if (fd < 0) {
+			SERIAL_LOG("XSERDPort::open: cannot open '%s': %s\n", device_name, strerror(errno));
 			goto open_error;
+		}
 
 #if defined(__linux__)
 		// Parallel port?
@@ -250,6 +286,7 @@ int16 XSERDPort::open(uint16 config)
 	output_thread_active = (pthread_create(&output_thread, &thread_attr, output_func, this) == 0);
 	if (!input_thread_active || !output_thread_active)
 		goto open_error;
+	SERIAL_LOG("XSERDPort::open: '%s' open, fd=%d%s\n", device_name, fd, emuser ? " (EMuSer baud translation)" : "");
 	return noErr;
 
 open_error:
@@ -285,6 +322,7 @@ open_error:
 
 int16 XSERDPort::prime_in(uint32 pb, uint32 dce)
 {
+	SERIAL_LOG("XSERDPort::prime_in: %u bytes requested\n", ReadMacInt32(pb + ioReqCount));
 	// Send input command to input_thread
 	read_done = false;
 	read_pending = true;
@@ -301,6 +339,7 @@ int16 XSERDPort::prime_in(uint32 pb, uint32 dce)
 
 int16 XSERDPort::prime_out(uint32 pb, uint32 dce)
 {
+	SERIAL_LOG("XSERDPort::prime_out: %u bytes\n", ReadMacInt32(pb + ioReqCount));
 	// Send output command to output_thread
 	write_done = false;
 	write_pending = true;
@@ -317,6 +356,7 @@ int16 XSERDPort::prime_out(uint32 pb, uint32 dce)
 
 int16 XSERDPort::control(uint32 pb, uint32 dce, uint16 code)
 {
+	SERIAL_LOG("XSERDPort::control: '%s' csCode %d csParam %04x\n", device_name, code, ReadMacInt16(pb + csParam));
 	switch (code) {
 		case 1:			// KillIO
 			io_killed = true;
@@ -351,65 +391,53 @@ int16 XSERDPort::control(uint32 pb, uint32 dce, uint16 code)
 		case kSERDBaudRate: {
 			if (protocol != serial)
 				return noErr;
+			static const uint16 rates[] = {
+				50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800, 9600, 19200, 31250, 38400, 57600
+			};
 			uint16 rate = ReadMacInt16(pb + csParam);
-			speed_t baud_rate;
-			if (rate <= 50) {
-				rate = 50; baud_rate = B50;
-			} else if (rate <= 75) {
-				rate = 75; baud_rate = B75;
-			} else if (rate <= 110) {
-				rate = 110; baud_rate = B110;
-			} else if (rate <= 134) {
-				rate = 134; baud_rate = B134;
-			} else if (rate <= 150) {
-				rate = 150; baud_rate = B150;
-			} else if (rate <= 200) {
-				rate = 200; baud_rate = B200;
-			} else if (rate <= 300) {
-				rate = 300; baud_rate = B300;
-			} else if (rate <= 600) {
-				rate = 600; baud_rate = B600;
-			} else if (rate <= 1200) {
-				rate = 1200; baud_rate = B1200;
-			} else if (rate <= 1800) {
-				rate = 1800; baud_rate = B1800;
-			} else if (rate <= 2400) {
-				rate = 2400; baud_rate = B2400;
-			} else if (rate <= 4800) {
-				rate = 4800; baud_rate = B4800;
-			} else if (rate <= 9600) {
-				rate = 9600; baud_rate = B9600;
-			} else if (rate <= 19200) {
-				rate = 19200; baud_rate = B19200;
-			} else if (rate <= 38400) {
-				rate = 38400; baud_rate = B38400;
-			} else if (rate <= 57600) {
-				rate = 57600; baud_rate = B57600;
-			} else {
-				// Just for safety in case someone wants a rate between 57600 and 65535
-				rate = 57600; baud_rate = B57600;
-			}
-			WriteMacInt16(pb + csParam, rate);
-			cfsetispeed(&mode, baud_rate);
-			cfsetospeed(&mode, baud_rate);
-			tcsetattr(fd, TCSANOW, &mode);
+			uint16 actual = 57600;	// Also for rates between 57600 and 65535
+			for (unsigned i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
+				if (rate <= rates[i]) {
+					actual = rates[i];
+					break;
+				}
+			WriteMacInt16(pb + csParam, actual);
+			baud = actual;
+			apply_line();
 			return noErr;
 		}
+
+		case kSERDClockMIDI:	// Clock from a MIDI interface (1 MHz on HSKi, x32)
+			if (protocol != serial)
+				return noErr;
+			baud = 31250;
+			ext_clock = false;
+			apply_line();
+			return noErr;
 
 		case kSERDHandshake:
 		case kSERDHandshakeRS232:
 			set_handshake(pb + csParam, true);
 			return noErr;
 
-		case kSERDMiscOptions:
+		case kSERDMiscOptions: {
 			if (protocol != serial)
 				return noErr;
-			if (ReadMacInt8(pb + csParam) & kOptionPreserveDTR)
+			uint8 options = ReadMacInt8(pb + csParam);
+			if (options & kOptionPreserveDTR)
 				mode.c_cflag &= ~HUPCL;
 			else
 				mode.c_cflag |= HUPCL;
-			tcsetattr(fd, TCSANOW, &mode);
+			// Bit 6: the data clock is driven by the external device through HSKi
+			// in x1 mode (e.g. E-mu Emax 500 kbaud transfers)
+			bool new_ext_clock = (options & kOptionClockX1CTS) != 0;
+			if (new_ext_clock != ext_clock) {
+				ext_clock = new_ext_clock;
+				apply_line();
+			} else
+				serial_set_mode(fd, &mode, custom_speed);
 			return noErr;
+		}
 
 		case kSERDAssertDTR: {
 			if (protocol != serial)
@@ -455,18 +483,16 @@ int16 XSERDPort::control(uint32 pb, uint32 dce, uint16 code)
 		case kSERD115KBaud:
 			if (protocol != serial)
 				return noErr;
-			cfsetispeed(&mode, B115200);
-			cfsetospeed(&mode, B115200);
-			tcsetattr(fd, TCSANOW, &mode);
+			baud = 115200;
+			apply_line();
 			return noErr;
 
 		case kSERD230KBaud:
 		case kSERDSetHighSpeed:
 			if (protocol != serial)
 				return noErr;
-			cfsetispeed(&mode, B230400);
-			cfsetospeed(&mode, B230400);
-			tcsetattr(fd, TCSANOW, &mode);
+			baud = 230400;
+			apply_line();
 			return noErr;
 
 		default:
@@ -503,8 +529,9 @@ int16 XSERDPort::status(uint32 pb, uint32 dce, uint16 code)
 				WriteMacInt8(p + staDsrHold, 0);
 				WriteMacInt8(p + staModemStatus, dsrEvent | dcdEvent | ctsEvent);
 			} else {
-				unsigned int status;
-				ioctl(fd, TIOCMGET, &status);
+				unsigned int status = 0;
+				if (ioctl(fd, TIOCMGET, &status) < 0)
+					status = TIOCM_CTS | TIOCM_DSR | TIOCM_CD;	// e.g. PTY: report lines as asserted
 				WriteMacInt8(p + staCtsHold, status & TIOCM_CTS ? 0 : 1);
 				WriteMacInt8(p + staDsrHold, status & TIOCM_DTR ? 0 : 1);
 				WriteMacInt8(p + staModemStatus,
@@ -616,78 +643,76 @@ bool XSERDPort::open_pty(void)
 bool XSERDPort::configure(uint16 config)
 {
 	D(bug(" configure %04x\n", config));
+	SERIAL_LOG("XSERDPort::configure: '%s' config %04x\n", device_name, config);
 	if (protocol != serial)
 		return true;
 
-	// Set number of stop bits
+	// Number of stop bits
 	switch (config & 0xc000) {
-		case stop10:
-			mode.c_cflag &= ~CSTOPB;
-			break;
-		case stop20:
-			mode.c_cflag |= CSTOPB;
-			break;
-		default:
-			return false;
+		case stop10: stop_bits = 1; break;
+		case stop20: stop_bits = 2; break;
+		default: return false;
 	}
 
-	// Set parity mode
+	// Parity mode
 	switch (config & 0x3000) {
-		case noParity:
-			mode.c_iflag &= ~INPCK;
-			mode.c_oflag &= ~PARENB;
-			break;
-		case oddParity:
-			mode.c_iflag |= INPCK;
-			mode.c_oflag |= PARENB;
-			mode.c_oflag |= PARODD;
-			break;
-		case evenParity:
-			mode.c_iflag |= INPCK;
-			mode.c_oflag |= PARENB;
-			mode.c_oflag &= ~PARODD;
-			break;
-		default:
-			return false;
+		case noParity: parity = 0; break;
+		case oddParity: parity = 1; break;
+		case evenParity: parity = 2; break;
+		default: return false;
 	}
 
-	// Set number of data bits
+	// Number of data bits
 	switch (config & 0x0c00) {
-		case data5:
-			mode.c_cflag = (mode.c_cflag & ~CSIZE) | CS5;
-			break;
-		case data6:
-			mode.c_cflag = (mode.c_cflag & ~CSIZE) | CS6;
-			break;
-		case data7:
-			mode.c_cflag = (mode.c_cflag & ~CSIZE) | CS7;
-			break;
-		case data8:
-			mode.c_cflag = (mode.c_cflag & ~CSIZE) | CS8;
-			break;
+		case data5: data_bits = 5; break;
+		case data6: data_bits = 6; break;
+		case data7: data_bits = 7; break;
+		case data8: data_bits = 8; break;
 	}
 
-	// Set baud rate
-	speed_t baud_rate;
+	// Baud rate
 	switch (config & 0x03ff) {
-		case baud150: baud_rate = B150; break;
-		case baud300: baud_rate = B300; break;
-		case baud600: baud_rate = B600; break;
-		case baud1200: baud_rate = B1200; break;
-		case baud1800: baud_rate = B1800; break;
-		case baud2400: baud_rate = B2400; break;
-		case baud4800: baud_rate = B4800; break;
-		case baud9600: baud_rate = B9600; break;
-		case baud19200: baud_rate = B19200; break;
-		case baud38400: baud_rate = B38400; break;
-		case baud57600: baud_rate = B57600; break;
+		case baud150: baud = 150; break;
+		case baud300: baud = 300; break;
+		case baud600: baud = 600; break;
+		case baud1200: baud = 1200; break;
+		case baud1800: baud = 1800; break;
+		case baud2400: baud = 2400; break;
+		case baud3600: baud = 3600; break;
+		case baud4800: baud = 4800; break;
+		case baud7200: baud = 7200; break;
+		case baud9600: baud = 9600; break;
+		case baud14400: baud = 14400; break;
+		case baud19200: baud = 19200; break;
+		case baud28800: baud = 28800; break;
+		case baud38400: baud = 38400; break;
+		case baud57600: baud = 57600; break;
 		default:
 			return false;
 	}
-	cfsetispeed(&mode, baud_rate);
-	cfsetospeed(&mode, baud_rate);
-	tcsetattr(fd, TCSANOW, &mode);
+	apply_line();
 	return true;
+}
+
+
+/*
+ *  Apply the current line settings to the host device
+ */
+
+void XSERDPort::apply_line(void)
+{
+	if (fd < 0 || protocol != serial)
+		return;
+
+	// With external clocking the bit rate is set by the device on HSKi (x1 mode)
+	uint32 rate = baud;
+	if (ext_clock) {
+		int32 clock = PrefsFindInt32("sccextclock");
+		rate = clock > 0 ? clock : 1000000;
+	}
+	uint32 host_rate = serial_apply_line(fd, &mode, rate, data_bits, parity, stop_bits, emuser, &custom_speed);
+	SERIAL_LOG("XSERDPort::apply_line: '%s' %u baud %d%c%d%s -> host %u baud\n", device_name, rate,
+		data_bits, "NOE"[parity], stop_bits, ext_clock ? " (external clock)" : "", host_rate);
 }
 
 
@@ -716,7 +741,7 @@ void XSERDPort::set_handshake(uint32 s, bool with_dtr)
 	}
 
 	D(bug(" %sware flow control\n", mode.c_cflag & CRTSCTS ? "hard" : "soft"));
-	tcsetattr(fd, TCSANOW, &mode);
+	serial_set_mode(fd, &mode, custom_speed);
 }
 
 
@@ -734,12 +759,46 @@ void *XSERDPort::input_func(void *arg)
 		if (s->quitting)
 			break;
 
-		// Execute command
-		void *buf = Mac2HostAddr(ReadMacInt32(s->input_pb + ioBuffer));
+		// Execute command; like the Mac Serial Driver, complete only when all
+		// requested bytes have arrived (or on KillIO/close)
+		uint8 *buf = (uint8 *)Mac2HostAddr(ReadMacInt32(s->input_pb + ioBuffer));
 		uint32 length = ReadMacInt32(s->input_pb + ioReqCount);
 		D(bug("input_func waiting for %ld bytes of data...\n", length));
-		int32 actual = read(s->fd, buf, length);
+		int32 actual = 0;
+		while (actual < (int32)length && !s->io_killed && !s->quitting) {
+			struct pollfd pfd;
+			pfd.fd = s->fd;
+			pfd.events = POLLIN;
+			pfd.revents = 0;
+			int res = poll(&pfd, 1, INPUT_POLL_TIMEOUT_MS);
+			if (res < 0 && errno != EINTR) {
+				actual = -1;
+				break;
+			}
+			if (res <= 0)
+				continue;
+			ssize_t n = 0;
+			if (pfd.revents & POLLIN)
+				n = read(s->fd, buf + actual, length - actual);
+			if (n > 0)
+				actual += n;
+			else if (n < 0 && errno != EAGAIN && errno != EINTR) {
+				actual = -1;
+				break;
+			} else if ((pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) || ((pfd.revents & POLLIN) && n == 0)) {
+				// Hangup/EOF, e.g. PTY peer (proxy) not connected: wait instead of spinning
+				usleep(INPUT_POLL_TIMEOUT_MS * 1000);
+			}
+		}
 		D(bug(" %ld bytes received\n", actual));
+		if (s->quitting)
+			break;
+		if (actual > 0 && serial_debug) {
+			fprintf(stderr, "XSERDPort: received %d bytes:", actual);
+			for (int32 i = 0; i < actual && i < 32; i++)
+				fprintf(stderr, " %02x", buf[i]);
+			fprintf(stderr, actual > 32 ? " ...\n" : "\n");
+		}
 
 #if MONITOR
 		bug("Receiving serial data:\n");
@@ -807,8 +866,26 @@ void *XSERDPort::output_func(void *arg)
 		bug("\n");
 #endif
 
-		int32 actual = write(s->fd, buf, length);
+		int32 actual = 0;
+		while (actual < (int32)length && !s->io_killed) {
+			ssize_t n = write(s->fd, (uint8 *)buf + actual, length - actual);
+			if (n > 0)
+				actual += n;
+			else if (n < 0 && errno == EINTR)
+				continue;
+			else {
+				if (actual == 0)
+					actual = -1;
+				break;
+			}
+		}
 		D(bug(" %ld bytes transmitted\n", actual));
+		if (actual > 0 && serial_debug) {
+			fprintf(stderr, "XSERDPort: sent %d bytes:", actual);
+			for (int32 i = 0; i < actual && i < 32; i++)
+				fprintf(stderr, " %02x", ((uint8 *)buf)[i]);
+			fprintf(stderr, actual > 32 ? " ...\n" : "\n");
+		}
 
 		// KillIO called? Then simply return
 		if (s->io_killed) {

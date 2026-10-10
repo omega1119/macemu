@@ -32,6 +32,7 @@
 #include "timer.h"
 #include "clip.h"
 #include "serial.h"
+#include "scc.h"
 #include "sony.h"
 #include "disk.h"
 #include "cdrom.h"
@@ -91,6 +92,9 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			TimerReset();
 			EtherReset();
 			AudioReset();
+#if SCC_EMULATION
+			SCCReset();
+#endif
 #ifdef USE_SDL_AUDIO
 			PlayStartupSound();
 #endif
@@ -241,6 +245,9 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			// Install drivers
 			D(bug("InstallDrivers\n"));
 			InstallDrivers(r->a[0]);
+#if SCC_EMULATION
+			SCCPatchLowMem();
+#endif
 
 			// Install PutScrap() patch
 			M68kRegisters r;

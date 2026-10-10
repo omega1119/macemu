@@ -43,6 +43,10 @@ prefs_desc common_prefs_items[] = {
 	{"screen", TYPE_STRING, false,    "video mode"},
 	{"seriala", TYPE_STRING, false,   "device name of Mac serial port A"},
 	{"serialb", TYPE_STRING, false,   "device name of Mac serial port B"},
+	{"serialdebug", TYPE_BOOLEAN, false, "log serial port and SCC activity to stderr"},
+	{"sccemu", TYPE_BOOLEAN, false,   "emulate SCC registers for programs that bypass the Serial Driver"},
+	{"sccextclock", TYPE_INT32, false, "frequency in Hz of the external clock on HSKi (SCC emulation)"},
+	{"sccpolldelay", TYPE_INT32, false, "microseconds a polled read of an empty SCC receiver takes"},
 	{"ether", TYPE_STRING, false,     "device name of Mac ethernet adapter"},
 	{"etherconfig", TYPE_STRING, false,"path of network config script"},
 	{"udptunnel", TYPE_BOOLEAN, false, "tunnel all network packets over UDP"},
@@ -101,6 +105,8 @@ void AddPrefsDefaults(void)
 	SysAddSerialPrefs();
 	PrefsAddBool("udptunnel", false);
 	PrefsAddInt32("udpport", 6066);
+	PrefsAddInt32("sccextclock", 1000000);	// MIDI interface clock (x32 = 31250 baud)
+	PrefsAddInt32("sccpolldelay", 5);
 	PrefsAddInt32("bootdriver", 0);
 	PrefsAddInt32("bootdrive", 0);
 	PrefsAddInt32("ramsize", 8 * 1024 * 1024);

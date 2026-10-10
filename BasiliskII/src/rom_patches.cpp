@@ -32,6 +32,7 @@
 #include "video.h"
 #include "extfs.h"
 #include "prefs.h"
+#include "scc.h"
 
 #if ENABLE_MON
 #include "mon.h"
@@ -1053,6 +1054,11 @@ static bool patch_rom_32(void)
 			// Fake address only if this is not the ASC base
 			if (lmg != 0xcc0)
 				WriteMacInt32(base + ofs*4, ScratchMemBase);
+#if SCC_EMULATION
+			// SCCRd/SCCWr point to the emulated SCC registers if enabled
+			if (SCCEmuSize && (lmg == 0x1d8 || lmg == 0x1dc))
+				WriteMacInt32(base + ofs*4, SCCEmuBase);
+#endif
 		}
 	}
 #else
